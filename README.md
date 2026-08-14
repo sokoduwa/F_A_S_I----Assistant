@@ -1,2 +1,2 @@
-# F_A_S_I----Assistant
+# FASI----Assistant
 Guided business case authoring and orchestration 
