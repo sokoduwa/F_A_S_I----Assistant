@@ -128,6 +128,22 @@ a{color:var(--link)} a:hover{color:var(--link-hover)}
 .bubble .callout.warn{border-left-color:var(--amber);background:#fbf3e5}
 .bubble .callout.info{border-left-color:var(--link);background:var(--blue-panel)}
 .msg-time{font-size:12px;color:var(--dark-grey);margin-top:6px}
+/* Teams-style system update posted back into the requester's thread */
+.sysupdate{display:flex;gap:12px;align-items:flex-start;animation:slidein .3s ease}
+.sysupdate .su-ico{width:40px;height:40px;border-radius:9px;flex-shrink:0;background:#e6ecfb;display:flex;align-items:center;justify-content:center}
+.sysupdate .su-ico svg{width:22px;height:22px;fill:#5b5fc7}
+.sysupdate .su-card{flex:1;background:#fff;border:1px solid var(--line);border-left:4px solid #5b5fc7;border-radius:4px 8px 8px 8px;padding:14px 16px;box-shadow:var(--shadow)}
+.sysupdate .su-card.ok{border-left-color:var(--green)}
+.sysupdate .su-card.warn{border-left-color:var(--amber)}
+.sysupdate .su-card.stop{border-left-color:var(--red)}
+.sysupdate .su-src{font-size:12px;color:var(--dark-grey);font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px;display:flex;align-items:center;gap:7px}
+.sysupdate .su-src .su-pill{background:#5b5fc7;color:#fff;font-size:10px;padding:2px 7px;border-radius:10px;letter-spacing:.3px}
+.sysupdate .su-title{font-size:17px;font-weight:700;margin-bottom:4px}
+.sysupdate .su-body{font-size:16px;line-height:1.4}
+.sysupdate .su-note{margin-top:9px;padding:9px 12px;background:#f3f2f1;border-radius:4px;font-size:15px}
+.sysupdate .su-note b{font-weight:700}
+.sysupdate .su-act{margin-top:12px}
+.sysupdate .su-time{font-size:12px;color:var(--dark-grey);margin-top:8px}
 
 /* choices as GOV.UK-style blocks */
 .choices{display:flex;flex-direction:column;gap:10px;margin:2px 0 4px 52px}
@@ -697,6 +713,26 @@ function userTurn(text){
 }
 function escapeHtml(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
+/* Post a system update back into the requester's Teams conversation thread.
+   kind: 'ok' | 'warn' | 'stop' | null. action: optional {label, fn} */
+function teamsUpdate(title,body,kind,note,action){
+  tick(5);
+  const el=document.createElement('div'); el.className='sysupdate';
+  let actHtml='';
+  if(action){ actHtml='<div class="su-act"><button class="gov-btn secondary" id="'+action.id+'">'+action.label+'</button></div>'; }
+  el.innerHTML='<div class="su-ico" aria-hidden="true">'+ICON.chat+'</div>'+
+    '<div class="su-card'+(kind?(' '+kind):'')+'">'+
+      '<div class="su-src"><span class="su-pill">Update</span> Funding &amp; Spend Assistant</div>'+
+      '<div class="su-title">'+escapeHtml(title)+'</div>'+
+      '<div class="su-body">'+body+'</div>'+
+      (note?('<div class="su-note"><b>Reviewer note:</b> '+escapeHtml(note)+'</div>'):'')+
+      actHtml+
+      '<div class="su-time">Posted to your conversation • '+hhmm()+'</div>'+
+    '</div>';
+  thread.appendChild(el); scrollThread();
+  if(action){ const b=document.getElementById(action.id); if(b) b.onclick=action.fn; }
+}
+
 function choices(list,hintLabel){
   const wrap=document.createElement('div'); wrap.className='choices'; wrap.id='choices';
   if(hintLabel){ const h=document.createElement('div'); h.className='choice-hint'; h.textContent=hintLabel; thread.appendChild(h); }
@@ -1044,6 +1080,7 @@ function statusPill(status){
     final_approval:['st-final','Awaiting final approval'],
     approved:['st-approved','Approved'],
     changes:['st-changes','Changes requested'],
+    withdrawn:['st-changes','Withdrawn'],
   };
   const m=map[status]||['st-sme',status];
   return '<span class="status-pill '+m[0]+'"><span class="sd"></span>'+m[1]+'</span>';
@@ -1124,7 +1161,7 @@ function openEmail(id){
     '<div class="ol-meta"><div class="ol-av">FS</div><div class="ol-mfrom"><b>'+escapeHtml(e.from)+'</b><span>'+escapeHtml(e.fromEmail)+'</span></div><div class="ol-mtime">'+nowShort(e.time)+'<br>To: '+escapeHtml(e.to)+'</div></div>'+
     '<div class="ol-content">'+bodyHtml+cardBox+action+'</div></div>';
 }
-function statusText(s){ return ({sme_review:'Pending SME review',sme_signed:'SME signed off',final_approval:'Awaiting final approval',approved:'Approved',changes:'Changes requested'})[s]||s; }
+function statusText(s){ return ({sme_review:'Pending SME review',sme_signed:'SME signed off',final_approval:'Awaiting final approval',approved:'Approved',changes:'Changes requested',withdrawn:'Withdrawn'})[s]||s; }
 
 /* ==========================================================================
    REVIEW & APPROVE
@@ -1175,21 +1212,44 @@ function docSection(no,title,body){
 function renderReviewActions(c,stage){
   const bar=document.getElementById('rvActions');
   if(stage==='sme' && c.status==='sme_review'){
-    bar.innerHTML='<div class="rv-prompt"><b>Subject-matter review.</b> Confirm the case is accurate, complete and sound.</div><div class="spacer"></div>'+
-      '<button class="ms-btn red" onclick="requestChanges(\''+c.id+'\')">Request changes</button>'+
+    bar.innerHTML='<div class="rv-prompt"><b>Subject-matter review.</b> Confirm the case is accurate, complete and sound, or return it.</div><div class="spacer"></div>'+
+      '<button class="ms-btn ghost" onclick="promptAction(\''+c.id+'\',\'withdraw\',\'sme\')">Withdraw</button>'+
+      '<button class="ms-btn red" onclick="promptAction(\''+c.id+'\',\'changes\',\'sme\')">Request changes</button>'+
       '<button class="ms-btn green" onclick="smeSignOff(\''+c.id+'\')">'+ICON.check+' Sign off</button>';
   } else if(stage==='approver' && c.status==='final_approval'){
-    bar.innerHTML='<div class="rv-prompt"><b>Final Approval '+c.band.n+'.</b> Authorise funding as '+escapeHtml(c.band.authority)+'.</div><div class="spacer"></div>'+
-      '<button class="ms-btn red" onclick="requestChanges(\''+c.id+'\')">Reject</button>'+
+    bar.innerHTML='<div class="rv-prompt"><b>Final Approval '+c.band.n+'.</b> Authorise funding as '+escapeHtml(c.band.authority)+', or return it.</div><div class="spacer"></div>'+
+      '<button class="ms-btn ghost" onclick="promptAction(\''+c.id+'\',\'withdraw\',\'approver\')">Withdraw</button>'+
+      '<button class="ms-btn red" onclick="promptAction(\''+c.id+'\',\'changes\',\'approver\')">Request changes</button>'+
       '<button class="ms-btn green" onclick="approveCase(\''+c.id+'\')">'+ICON.check+' Approve and authorise</button>';
   } else {
     bar.innerHTML='<div class="rv-done">'+ICON.check+' '+statusText(c.status)+'</div><div class="spacer"></div><button class="ms-btn ghost" onclick="switchView(\'dashboard\')">View on dashboard</button>';
   }
 }
-function backFromReview(){
-  // go back to wherever makes sense
-  switchView('outlook');
+
+/* note capture for Request changes / Withdraw */
+function promptAction(id,type,stage){
+  const isChanges=type==='changes';
+  const bar=document.getElementById('rvActions');
+  const label=isChanges?'What needs to be updated?':'Why is this case being withdrawn?';
+  const ph=isChanges?'For example: the value-for-money case needs a named alternative and a cost estimate.':'For example: the requirement is no longer needed this financial year.';
+  bar.innerHTML='<div style="flex:1;width:100%"><label for="rvNote" style="display:block;font-size:15px;font-weight:700;margin-bottom:6px">'+label+'</label>'+
+    '<textarea id="rvNote" style="width:100%;font-family:inherit;font-size:16px;padding:10px 12px;border:2px solid var(--text);min-height:70px;resize:vertical" placeholder="'+ph+'"></textarea>'+
+    '<div style="margin-top:10px;display:flex;gap:10px;justify-content:flex-end">'+
+      '<button class="ms-btn ghost" onclick="cancelAction(\''+id+'\',\''+stage+'\')">Cancel</button>'+
+      '<button class="ms-btn '+(isChanges?'red':'')+'" onclick="commitAction(\''+id+'\',\''+type+'\',\''+stage+'\')">'+(isChanges?'Send back with note':'Confirm withdrawal')+'</button>'+
+    '</div></div>';
+  const t=document.getElementById('rvNote'); if(t) setTimeout(()=>t.focus(),60);
 }
+function cancelAction(id,stage){ const c=S.cases.find(x=>x.id===id); if(c) renderReviewActions(c,stage); }
+function commitAction(id,type,stage){
+  const c=S.cases.find(x=>x.id===id); if(!c) return;
+  const note=((document.getElementById('rvNote')||{}).value||'').trim();
+  if(type==='changes') requestChanges(id,stage,note);
+  else withdrawCase(id,stage,note);
+}
+
+function backFromReview(){ switchView('outlook'); }
+
 function smeSignOff(id){
   const c=S.cases.find(x=>x.id===id); if(!c) return;
   c.status='final_approval';
@@ -1198,12 +1258,12 @@ function smeSignOff(id){
   addEmail({ kind:'approver', caseId:c.id, from:'Funding & Spend Assistant', fromEmail:'noreply@funding.hmt.gov.uk',
     subject:'Approval required: '+c.id+' — Final Approval '+c.band.n+' ('+c.band.label+')',
     preview:'Signed off by the SME and ready for your authorisation.', to:S.user.email });
-  notify('SME signed off','success','The subject-matter expert has signed off '+c.id+'. It is now with Final Approval '+c.band.n+' ('+c.band.authority+').');
+  notify('SME signed off','success','The subject-matter expert has signed off '+c.id+'. It is now with Final Approval '+c.band.n+'.');
+  teamsUpdate('Your business case has been signed off','The reviewing subject-matter expert has signed off <strong>'+c.id+'</strong>. It has now been sent for <strong>Final Approval '+c.band.n+'</strong> ('+escapeHtml(c.band.authority)+'). No action is needed from you.','ok');
   updateBadges(); refreshDashboard();
-  // reflect on screen
   renderReviewActions(c,'done');
-  toast('Signed off','success','A notification and approval request have been sent. Open Outlook to act as the approver.');
-  setTimeout(()=>switchView('outlook'),1200);
+  toast('Signed off','success','The requester has been notified in Teams. Open Outlook to act as the approver.');
+  setTimeout(()=>switchView('outlook'),1300);
 }
 function approveCase(id){
   const c=S.cases.find(x=>x.id===id); if(!c) return;
@@ -1213,19 +1273,41 @@ function approveCase(id){
   addEmail({ kind:'approved', caseId:c.id, from:'Funding & Spend Assistant', fromEmail:'noreply@funding.hmt.gov.uk',
     subject:'Approved: business case '+c.id+' has been authorised',
     preview:'Your business case has been fully approved.', to:S.user.email });
-  notify('Case approved','success',c.id+' has been fully approved and authorised. The end-to-end process is complete.');
+  notify('Case approved','success',c.id+' has been fully approved and authorised.');
+  teamsUpdate('Your business case has been approved','<strong>'+c.id+'</strong> has been approved and authorised by '+escapeHtml(c.band.authority)+' under Final Approval '+c.band.n+'. The funding process is complete and a full audit trail is available.','ok');
   updateBadges(); refreshDashboard();
   renderReviewActions(c,'done');
-  toast('Approved','success','Business case '+c.id+' is fully authorised. The dashboard shows the complete audit trail.');
+  toast('Approved','success','Business case '+c.id+' is fully authorised. The requester has been notified in Teams.');
 }
-function requestChanges(id){
+function requestChanges(id,stage,note){
   const c=S.cases.find(x=>x.id===id); if(!c) return;
-  c.status='changes';
-  audit('Changes requested',S.reviewCtx.stage==='sme'?'Subject-matter expert':'Approver','Returned to the author for revision');
-  notify('Changes requested','warn','The reviewer has requested changes to '+c.id+'. The author has been notified to revise and resubmit.');
+  c.status='changes'; c.lastNote=note;
+  const who = stage==='sme'?'The subject-matter expert':'The approver ('+c.band.authority+')';
+  audit('Changes requested', stage==='sme'?'Subject-matter expert':'Approver', 'Returned to the requester'+(note?(': '+note):''));
+  notify('Changes requested','warn',who+' has requested changes to '+c.id+'.');
+  teamsUpdate('Changes have been requested on your business case',who+' has reviewed <strong>'+c.id+'</strong> and asked for some changes before it can proceed.','warn',note,{id:'revise-'+c.id, label:'Revise this business case', fn:function(){reviseCase(c.id);}});
   updateBadges(); refreshDashboard();
   renderReviewActions(c,'done');
-  toast('Returned to author','warn','A notification has been sent to the author to revise '+c.id+'.');
+  toast('Returned to requester','warn','A notification has been posted to the requester in Teams.');
+  setTimeout(()=>switchView('assistant'),1300);
+}
+function withdrawCase(id,stage,note){
+  const c=S.cases.find(x=>x.id===id); if(!c) return;
+  c.status='withdrawn'; c.lastNote=note;
+  const who = stage==='sme'?'the subject-matter expert':'the approver';
+  audit('Case withdrawn', stage==='sme'?'Subject-matter expert':'Approver', 'Withdrawn'+(note?(': '+note):''));
+  notify('Case withdrawn',null,c.id+' has been withdrawn by '+who+'.');
+  teamsUpdate('Your business case has been withdrawn','<strong>'+c.id+'</strong> has been withdrawn by '+who+' and will not proceed. It has been closed and recorded for audit.','stop',note);
+  updateBadges(); refreshDashboard();
+  renderReviewActions(c,'done');
+  toast('Case withdrawn',null,'The requester has been notified in Teams.');
+  setTimeout(()=>switchView('assistant'),1300);
+}
+function reviseCase(id){
+  const c=S.cases.find(x=>x.id===id); if(!c) return;
+  switchView('assistant');
+  botTurn('<p>Let us revise business case <strong>'+c.id+'</strong> together. Here is what the reviewer asked for:</p>'+(c.lastNote?('<div class="callout warn">'+escapeHtml(c.lastNote)+'</div>'):'')+'<p>In this demonstration you can restart the case to apply the changes.</p>',
+    function(){ choices([{label:'Start a revised business case',icon:ICON.edit,action:startCreate}],'Continue'); });
 }
 
 /* reminder demo (from dashboard) */
